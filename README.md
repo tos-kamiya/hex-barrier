@@ -4,16 +4,16 @@
 
 ## スクリーンショット
 
-| 円筒形 | 五角形 | 五角形（隙間あり） |
+| 円筒形（テーパー） | 五角形 | 五角形（隙間あり） |
 | :---: | :---: | :---: |
-| <img src="hex_cylinder_screenshot.png" alt="Cylinder" width="250"> | <img src="hex_pent_screenshot.png" alt="Pentagon" width="250"> | <img src="hex_pent_gapped_screenshot.png" alt="Pentagon Gapped" width="250"> |
+| <img src="hex_cylinder_tapered_lattice.png" alt="Tapered Cylinder" width="250"> | <img src="hex_pent_screenshot.png" alt="Pentagon" width="250"> | <img src="hex_pent_gapped_screenshot.png" alt="Pentagon Gapped" width="250"> |
 
 ## デモ
 
 以下のHTMLファイルをブラウザで開くことで、それぞれのバリアのデモを確認できます。
 
-*   [**円筒形バリア** (`hex_cylinder_barrier.html`)](hex_cylinder_barrier.html)
-    *   六角形を円筒状に配置し、緯度に応じてタイルの形状を伸縮させることで擬似的な球体を表現しています。極部分でタイルが大きく歪む特徴があります。
+*   [**円筒形バリア（テーパー）** (`hex_cylinder_tapered_lattice.html`)](hex_cylinder_tapered_lattice.html)
+    *   円筒上の正六角形ラティスをベースに、緯度方向に縦寸法と列間隔を逐次補正しながら極へ向けて絞り込むことで、ギャップのない球状シェルを形成しています。
 *   [**五角形バリア** (`hex_pent_barrier.html`)](hex_pent_barrier.html)
     *   正二十面体を細分化した測地線ドーム（geodesic dome）の双対メッシュを利用しています。これにより、12個の五角形と多数の六角形が配置され、より均一で歪みの少ない球体メッシュを構築しています。
 *   [**五角形バリア（隙間あり）** (`hex_pent_barrier_gapped.html`)](hex_pent_barrier_gapped.html)

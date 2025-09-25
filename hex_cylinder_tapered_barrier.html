@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Hex Cylinder Barrier – Three.js Demo</title>
+  <title>Hex Cylinder Tapered Barrier – Three.js Demo</title>
   <style>
     html,body{height:100%;margin:0;background:#05070a;color:#e6eef8;font-family:system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji"}
     #app{position:fixed;inset:0}
@@ -19,7 +19,7 @@
 </head>
 <body>
   <div id="app"></div>
-  <div class="hud">六角形を円筒状に配置した“バリア”ネット<br/>クリック＆ドラッグで視点回転（ホイールでズーム）</div>
+  <div class="hud">円筒上の六角形グリッドを極方向へ絞り込んだ“バリア”ネット<br/>クリック＆ドラッグで視点回転（ホイールでズーム）</div>
   <div class="tests" id="tests"><h3>Self‑Tests</h3><ul id="test-list"><li>Running…</li></ul></div>
 
   <script type="module">
@@ -58,14 +58,17 @@
     // ===== parameters =====
     const SPHERE_RADIUS = 2.2;
     const HEX_SIZE = 0.3;
-    const GRID_HEIGHT = Math.PI * SPHERE_RADIUS;
 
     const hexHeight = 2 * HEX_SIZE;
     const hexWidth = Math.sqrt(3) * HEX_SIZE;
     const MIN_HEX_PER_ROW = 6;
-    const MIN_HEX_HEIGHT_SCALE = 0.05;
-    const MAX_VERTICAL_STRETCH = 3.0;
-    const SIN60 = Math.sin(Math.PI / 3);
+
+    const equatorCircumference = 2 * Math.PI * SPHERE_RADIUS;
+    const NUM_HEX_AROUND = Math.max(MIN_HEX_PER_ROW, Math.round(equatorCircumference / hexWidth));
+    const ROW_STRIDE = hexHeight * 0.75;
+    const deltaLat = ROW_STRIDE / SPHERE_RADIUS;
+    const LAT_LIMIT = (Math.PI / 2) * 0.98;
+    const MAX_ROW_INDEX = Math.ceil(LAT_LIMIT / deltaLat);
 
     // ===== Create polygons =====
     const group = new THREE.Group();
@@ -85,63 +88,19 @@
 
     let hexCount = 0;
     const polygons = [];
-
-    function computeRowParameters(lat) {
-      const cosine = Math.max(0, Math.cos(lat));
-      const circumference = 2 * Math.PI * SPHERE_RADIUS * cosine;
-      const approx = circumference / hexWidth;
-      const numHex = Math.max(MIN_HEX_PER_ROW, Math.round(approx));
-      const horizScale = numHex > 0 ? (circumference / numHex) / hexWidth : 1.0;
-      const baseHeightScale = (1.0 - MIN_HEX_HEIGHT_SCALE) * cosine + MIN_HEX_HEIGHT_SCALE;
-      const boostTarget = horizScale / Math.max(baseHeightScale, 1e-3);
-      const boost = Math.min(MAX_VERTICAL_STRETCH, boostTarget);
-      const verticalScale = baseHeightScale * boost;
-      return { numHex, horizScale, baseHeightScale, verticalScale };
-    }
-
-    function latFromY(yFlat) {
-      return (yFlat / (GRID_HEIGHT / 2)) * (Math.PI / 2);
-    }
-
-    function solveStep(currentY) {
-      let lat = latFromY(currentY);
-      let metrics = computeRowParameters(lat);
-      let step = (hexHeight * 0.75) * metrics.verticalScale;
-      for (let iter = 0; iter < 3; iter++) {
-        const nextLat = latFromY(currentY + step);
-        const nextMetrics = computeRowParameters(nextLat);
-        const target = (hexHeight * 0.75) * nextMetrics.verticalScale;
-        if (!isFinite(target) || target <= 0) break;
-        if (Math.abs(target - step) < 1e-4) {
-          step = target;
-          break;
-        }
-        step = (step + target) * 0.5;
-      }
-      return step;
-    }
+    const tmpOffset = new THREE.Vector3();
 
     function createHexRow(rowInfo) {
-      const y_flat_center = rowInfo.y;
-      const center_lat = (y_flat_center / (GRID_HEIGHT / 2)) * (Math.PI / 2);
-      if (Math.abs(center_lat) > Math.PI / 2) return;
+      const center_lat = rowInfo.lat;
+      const cosine = Math.max(0, Math.cos(center_lat));
+      if (cosine <= 0) return;
 
-      const { numHex, horizScale, baseHeightScale, verticalScale } = computeRowParameters(center_lat);
-      const num_hex_in_row = numHex;
-      if (num_hex_in_row <= 0) return;
+      const circumference = equatorCircumference * cosine;
+      const horizScale = circumference / Math.max(NUM_HEX_AROUND * hexWidth, 1e-6);
+      if (!isFinite(horizScale) || horizScale <= 0) return;
+      const verticalScale = THREE.MathUtils.clamp(Math.pow(Math.max(horizScale, 1e-3), 0.9), 0.1, 1.0);
 
-      let appliedVerticalScale = verticalScale;
-      if (rowInfo.availableHalfSpan && rowInfo.availableHalfSpan > 0) {
-        const maxFromGap = rowInfo.availableHalfSpan / (HEX_SIZE * SIN60);
-        if (maxFromGap > 0) {
-          appliedVerticalScale = Math.min(appliedVerticalScale, maxFromGap);
-          if (maxFromGap >= baseHeightScale) {
-            appliedVerticalScale = Math.max(appliedVerticalScale, baseHeightScale);
-          }
-        }
-      }
-      appliedVerticalScale = Math.max(appliedVerticalScale, MIN_HEX_HEIGHT_SCALE);
-
+      const num_hex_in_row = NUM_HEX_AROUND;
       const rowParity = Math.abs(rowInfo.index) % 2;
       const offset = rowParity * 0.5;
 
@@ -149,34 +108,43 @@
         const fraction = (q + offset) / num_hex_in_row;
         const lon_center = fraction * Math.PI * 2;
 
-        const cos_center = Math.cos(center_lat);
-        const sin_center = Math.sin(center_lat);
+        const cosLon = Math.cos(lon_center);
+        const sinLon = Math.sin(lon_center);
+        const cosLat = Math.cos(center_lat);
+        const sinLat = Math.sin(center_lat);
+
         const centerVec = new THREE.Vector3(
-          SPHERE_RADIUS * cos_center * Math.cos(lon_center),
-          SPHERE_RADIUS * sin_center,
-          SPHERE_RADIUS * cos_center * Math.sin(lon_center)
+          SPHERE_RADIUS * cosLat * cosLon,
+          SPHERE_RADIUS * sinLat,
+          SPHERE_RADIUS * cosLat * sinLon
         );
 
         const normalVec = centerVec.clone().normalize();
-        const east = new THREE.Vector3(-Math.sin(lon_center), 0, Math.cos(lon_center)).normalize();
-        const north = new THREE.Vector3().crossVectors(east, normalVec).normalize();
+        const arbitrary = Math.abs(normalVec.y) > 0.98 ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 1, 0);
+        const east = new THREE.Vector3().crossVectors(arbitrary, normalVec).normalize();
+        if (east.lengthSq() < 1e-6) {
+          east.set(1, 0, 0);
+        }
+        const north = new THREE.Vector3().crossVectors(normalVec, east).normalize();
 
         const pts = [];
         for (let i = 0; i < 6; i++) {
           const angle = Math.PI / 3 * i;
-          const y_offset = HEX_SIZE * Math.sin(angle);
-          const scaled_y_offset = y_offset * appliedVerticalScale * 1.2;
+          const y_offset = HEX_SIZE * Math.sin(angle) * verticalScale;
           const x_offset = HEX_SIZE * Math.cos(angle) * horizScale;
 
-          const tangentOffset = east.clone().multiplyScalar(x_offset)
-            .add(north.clone().multiplyScalar(scaled_y_offset));
-          const vertex = centerVec.clone().add(tangentOffset).normalize().multiplyScalar(SPHERE_RADIUS);
+          tmpOffset.copy(east).multiplyScalar(x_offset)
+            .addScaledVector(north, y_offset);
+
+          const vertex = centerVec.clone().add(tmpOffset).normalize().multiplyScalar(SPHERE_RADIUS);
           pts.push(vertex);
         }
 
-        if (pts.length < 6) continue;
+        if (pts.length < 3) continue;
 
-        const faceCenter = centerVec.clone();
+        const faceCenter = new THREE.Vector3();
+        for (const p of pts) faceCenter.add(p);
+        faceCenter.divideScalar(pts.length);
         hexCount++;
 
         const triPositions = new Float32Array(pts.length * 9);
@@ -208,48 +176,18 @@
       }
     }
 
-    // --- Cumulative placement logic ---
-    const rows = [{ y: 0, index: 0 }];
-    let positive_y = 0;
-    let negative_y = 0;
-
-    const HALF_GRID_HEIGHT = GRID_HEIGHT / 2;
-    const EPSILON = 1e-4;
-    const MAX_ROW_ITER = 256;
-
-    for (let r = 1; r < MAX_ROW_ITER; r++) {
-      let step_p = solveStep(positive_y);
-
-      if (positive_y + step_p >= HALF_GRID_HEIGHT - EPSILON) {
-        step_p = (HALF_GRID_HEIGHT - EPSILON) - positive_y;
+    const rows = [];
+    for (let idx = -MAX_ROW_INDEX; idx <= MAX_ROW_INDEX; idx++) {
+      const latCandidate = idx * deltaLat;
+      const clampedLat = THREE.MathUtils.clamp(latCandidate, -LAT_LIMIT, LAT_LIMIT);
+      if (rows.length > 0) {
+        const prevLat = rows[rows.length - 1].lat;
+        if (Math.abs(prevLat - clampedLat) < 1e-5) continue;
       }
-
-      if (step_p <= 0) break;
-
-      positive_y += step_p;
-      if (positive_y >= HALF_GRID_HEIGHT) break;
-      rows.push({ y: positive_y, index: r });
-
-      const step_n = step_p;
-      negative_y -= step_n;
-      if (negative_y <= -HALF_GRID_HEIGHT) break;
-      rows.push({ y: negative_y, index: -r });
-
-      if (positive_y >= HALF_GRID_HEIGHT - EPSILON) break;
+      rows.push({ lat: clampedLat, index: idx });
     }
 
-    rows.sort((a, b) => a.y - b.y);
-
-    for (let i = 0; i < rows.length; i++) {
-      const row = rows[i];
-      const distanceToPole = HALF_GRID_HEIGHT - Math.abs(row.y);
-      const gapUp = i < rows.length - 1 ? rows[i + 1].y - row.y : distanceToPole;
-      const gapDown = i > 0 ? row.y - rows[i - 1].y : distanceToPole;
-      const halfGapUp = i < rows.length - 1 ? gapUp * 0.5 : gapUp;
-      const halfGapDown = i > 0 ? gapDown * 0.5 : gapDown;
-      row.availableHalfSpan = Math.max(0, Math.min(halfGapUp, halfGapDown));
-    }
-
+    rows.sort((a, b) => a.lat - b.lat);
     rows.forEach(createHexRow);
 
     // ===== Self tests =====
